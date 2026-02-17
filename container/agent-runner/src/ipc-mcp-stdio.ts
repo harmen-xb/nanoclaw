@@ -40,6 +40,32 @@ const server = new McpServer({
 });
 
 server.tool(
+  'send_question',
+  "Send a question with inline button options to the user in Telegram. The user taps a button to answer — no typing required. Use this when you need the user to choose from a set of options. Each option needs a label (shown on the button) and a value (what gets sent back when tapped).",
+  {
+    question: z.string().describe('The question text to display'),
+    options: z.array(z.object({
+      label: z.string().describe('Button label shown to the user (keep short, max ~20 chars)'),
+      value: z.string().describe('Value sent back when this option is selected'),
+    })).min(1).max(8).describe('The answer options (1-8 options, shown as inline buttons)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'question',
+      chatJid,
+      question: args.question,
+      options: args.options,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Question sent.' }] };
+  },
+);
+
+server.tool(
   'send_message',
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
