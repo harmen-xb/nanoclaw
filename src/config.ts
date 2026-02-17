@@ -5,7 +5,7 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ONLY']);
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ONLY', 'TEAMS_APP_ID', 'TEAMS_APP_SECRET', 'TEAMS_PORT', 'TEAMS_TENANT_ID']);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -15,6 +15,15 @@ export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY =
   (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+export const TEAMS_APP_ID =
+  process.env.TEAMS_APP_ID || envConfig.TEAMS_APP_ID || '';
+export const TEAMS_APP_SECRET =
+  process.env.TEAMS_APP_SECRET || envConfig.TEAMS_APP_SECRET || '';
+export const TEAMS_PORT = parseInt(
+  process.env.TEAMS_PORT || envConfig.TEAMS_PORT || '3978', 10
+);
+export const TEAMS_TENANT_ID =
+  process.env.TEAMS_TENANT_ID || envConfig.TEAMS_TENANT_ID || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

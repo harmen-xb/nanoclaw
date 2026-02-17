@@ -9,9 +9,12 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
+  TEAMS_APP_ID,
+  TEAMS_APP_SECRET,
   TRIGGER_PATTERN,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
+import { TeamsChannel } from './channels/teams.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -464,6 +467,17 @@ async function main(): Promise<void> {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     await telegram.connect();
+  }
+
+  // Create and connect Teams channel
+  if (TEAMS_APP_ID && TEAMS_APP_SECRET) {
+    const teams = new TeamsChannel({
+      ...channelOpts,
+      appId: TEAMS_APP_ID,
+      appSecret: TEAMS_APP_SECRET,
+    });
+    channels.push(teams);
+    await teams.connect();
   }
 
   // Start subsystems
