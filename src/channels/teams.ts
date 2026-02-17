@@ -6,12 +6,14 @@ import {
   Activity,
 } from 'botbuilder';
 import { Server } from 'http';
+import https from 'https';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN, TEAMS_PORT, TEAMS_TENANT_ID, GROUPS_DIR, MAIN_GROUP_FOLDER } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, QuestionOption, RegisteredGroup } from '../types.js';
+import { Channel, OnInboundMessage, OnChatMetadata, QuestionOption, RegisteredGroup, MediaContent } from '../types.js';
 
 export interface TeamsChannelOpts {
   onMessage: OnInboundMessage;
@@ -34,6 +36,33 @@ function toTeamsJid(activity: Partial<Activity>): string {
   // Strip ;messageid=... suffix — present in channel messages but not stable
   const channelId = rawChannelId.replace(/;messageid=.*$/, '');
   return `teams:${tenantId}:${channelId}`;
+}
+
+/**
+ * Fetches an attachment from Teams CDN using a Bearer token.
+ * Teams requires bot auth to download user-uploaded files/images.
+ * Returns base64-encoded data or null on failure.
+ */
+async function fetchTeamsAttachment(url: string, token: string): Promise<{ data: string; contentType: string } | null> {
+  return new Promise((resolve) => {
+    const lib = url.startsWith('https') ? https : http;
+    const req = lib.get(url, { headers: { Authorization: `Bearer ${token}` } }, (res) => {
+      if (res.statusCode !== 200) {
+        logger.warn({ url, status: res.statusCode }, 'Failed to fetch Teams attachment');
+        resolve(null);
+        return;
+      }
+      const contentType = res.headers['content-type'] || 'application/octet-stream';
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({ data: Buffer.concat(chunks).toString('base64'), contentType }));
+    });
+    req.on('error', (err) => {
+      logger.warn({ err, url }, 'Error fetching Teams attachment');
+      resolve(null);
+    });
+    req.setTimeout(15000, () => { req.destroy(); resolve(null); });
+  });
 }
 
 export class TeamsChannel implements Channel {
@@ -146,6 +175,48 @@ export class TeamsChannel implements Channel {
         }
       }
 
+      // Handle image/file attachments (requires supportsFiles: true in manifest)
+      let media: MediaContent | undefined;
+      const attachments = activity.attachments || [];
+      for (const attachment of attachments) {
+        // Skip adaptive cards and other bot framework attachments
+        if (!attachment.contentUrl) continue;
+        const mimeType = attachment.contentType || 'application/octet-stream';
+        if (!mimeType.startsWith('image/') && !mimeType.startsWith('application/vnd.microsoft.teams.file')) continue;
+
+        try {
+          // Get a bearer token to authenticate the CDN request
+          const credentials = (this.adapter as any).credentials || (this.adapter as any)._credentialProvider;
+          let token: string | null = null;
+          if (credentials?.getToken) {
+            token = await credentials.getToken();
+          } else if ((this.adapter as any).credentialsProvider?.getAppCredentials) {
+            const creds = await (this.adapter as any).credentialsProvider.getAppCredentials(this.opts.appId);
+            token = await creds?.getToken?.();
+          }
+
+          if (!token) {
+            logger.warn({ jid }, 'Could not get bearer token for Teams attachment fetch');
+            break;
+          }
+
+          const result = await fetchTeamsAttachment(attachment.contentUrl, token);
+          if (result) {
+            const isImage = result.contentType.startsWith('image/');
+            media = {
+              type: isImage ? 'image' : 'document',
+              data: result.data,
+              mediaType: result.contentType,
+              filename: attachment.name,
+            };
+            logger.info({ jid, contentType: result.contentType, filename: attachment.name }, 'Teams attachment fetched');
+            break; // Only handle one attachment per message for now
+          }
+        } catch (err) {
+          logger.warn({ err, jid }, 'Failed to process Teams attachment');
+        }
+      }
+
       this.opts.onMessage(jid, {
         id: activity.id || Date.now().toString(),
         chat_jid: jid,
@@ -154,9 +225,10 @@ export class TeamsChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        ...(media ? { media } : {}),
       });
 
-      logger.info({ jid, channelName, sender: senderName }, 'Teams message stored');
+      logger.info({ jid, channelName, sender: senderName, hasMedia: !!media }, 'Teams message stored');
       await next();
     });
 
