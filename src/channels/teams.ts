@@ -46,7 +46,8 @@ function toTeamsJid(activity: Partial<Activity>): string {
 async function fetchTeamsAttachment(url: string, token: string): Promise<{ data: string; contentType: string } | null> {
   return new Promise((resolve) => {
     const lib = url.startsWith('https') ? https : http;
-    const req = lib.get(url, { headers: { Authorization: `Bearer ${token}` } }, (res) => {
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    const req = lib.get(url, { headers }, (res) => {
       if (res.statusCode !== 200) {
         logger.warn({ url, status: res.statusCode }, 'Failed to fetch Teams attachment');
         resolve(null);
@@ -176,40 +177,66 @@ export class TeamsChannel implements Channel {
       }
 
       // Handle image/file attachments (requires supportsFiles: true in manifest)
+      // Teams sends attachments in two formats:
+      //   1. Inline images: contentType=image/*, contentUrl requires Bearer token
+      //   2. File uploads: contentType=application/vnd.microsoft.teams.file.download.info,
+      //      content.downloadUrl is a pre-authenticated SharePoint URL (no Bearer needed)
       let media: MediaContent | undefined;
       const attachments = activity.attachments || [];
       for (const attachment of attachments) {
-        // Skip adaptive cards and other bot framework attachments
-        if (!attachment.contentUrl) continue;
         const mimeType = attachment.contentType || 'application/octet-stream';
-        if (!mimeType.startsWith('image/') && !mimeType.startsWith('application/vnd.microsoft.teams.file')) continue;
+        const isTeamsFile = mimeType === 'application/vnd.microsoft.teams.file.download.info';
+        const isInlineImage = mimeType.startsWith('image/');
+
+        if (!isTeamsFile && !isInlineImage) continue;
 
         try {
-          // Get a bearer token to authenticate the CDN request
-          const credentials = (this.adapter as any).credentials || (this.adapter as any)._credentialProvider;
-          let token: string | null = null;
-          if (credentials?.getToken) {
-            token = await credentials.getToken();
-          } else if ((this.adapter as any).credentialsProvider?.getAppCredentials) {
-            const creds = await (this.adapter as any).credentialsProvider.getAppCredentials(this.opts.appId);
-            token = await creds?.getToken?.();
+          let fetchUrl: string | null = null;
+          let fetchToken: string | null = null;
+          let resolvedMimeType = mimeType;
+
+          if (isTeamsFile) {
+            // File upload: extract pre-authenticated SharePoint download URL from content
+            const fileInfo = attachment.content as any;
+            fetchUrl = fileInfo?.downloadUrl || null;
+            // Infer mime type from file extension
+            const ext = (attachment.name || '').split('.').pop()?.toLowerCase();
+            const extMap: Record<string, string> = {
+              png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+              gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+              pdf: 'application/pdf',
+            };
+            resolvedMimeType = (ext && extMap[ext]) || 'application/octet-stream';
+            logger.info({ jid, filename: attachment.name, fetchUrl: fetchUrl?.slice(0, 80) }, 'Teams file download attachment');
+          } else if (isInlineImage && attachment.contentUrl) {
+            // Inline image: needs Bearer token to download from Teams CDN
+            fetchUrl = attachment.contentUrl;
+            const credentials = (this.adapter as any).credentials || (this.adapter as any)._credentialProvider;
+            if (credentials?.getToken) {
+              fetchToken = await credentials.getToken();
+            } else if ((this.adapter as any).credentialsProvider?.getAppCredentials) {
+              const creds = await (this.adapter as any).credentialsProvider.getAppCredentials(this.opts.appId);
+              fetchToken = await creds?.getToken?.();
+            }
+            if (!fetchToken) {
+              logger.warn({ jid }, 'Could not get bearer token for inline Teams image');
+              continue;
+            }
           }
 
-          if (!token) {
-            logger.warn({ jid }, 'Could not get bearer token for Teams attachment fetch');
-            break;
-          }
+          if (!fetchUrl) continue;
 
-          const result = await fetchTeamsAttachment(attachment.contentUrl, token);
+          const result = await fetchTeamsAttachment(fetchUrl, fetchToken || '');
           if (result) {
-            const isImage = result.contentType.startsWith('image/');
+            const effectiveMime = isTeamsFile ? resolvedMimeType : result.contentType;
+            const isImage = effectiveMime.startsWith('image/');
             media = {
               type: isImage ? 'image' : 'document',
               data: result.data,
-              mediaType: result.contentType,
+              mediaType: effectiveMime,
               filename: attachment.name,
             };
-            logger.info({ jid, contentType: result.contentType, filename: attachment.name }, 'Teams attachment fetched');
+            logger.info({ jid, contentType: effectiveMime, filename: attachment.name, isTeamsFile }, 'Teams attachment fetched');
             break; // Only handle one attachment per message for now
           }
         } catch (err) {
