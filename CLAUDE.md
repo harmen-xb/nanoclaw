@@ -29,6 +29,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/add-azure-devops` | Add Azure DevOps integration for work item queries, sprint management, and posting investigation comments |
+| `/add-cloudflare-tunnel` | Set up a named Cloudflare Tunnel with a permanent HTTPS URL to expose local ports (e.g. Teams bot on port 3978) — one account supports multiple tunnels for multiple instances |
 
 ## Development
 
