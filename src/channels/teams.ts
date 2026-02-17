@@ -22,10 +22,13 @@ export interface TeamsChannelOpts {
 /**
  * Converts a Teams conversation reference into a stable JID.
  * Format: teams:<tenantId>:<channelId>
+ * Strips any ;messageid=... suffix from the conversation ID to ensure stability.
  */
 function toTeamsJid(activity: Partial<Activity>): string {
   const tenantId = activity.conversation?.tenantId || 'unknown';
-  const channelId = activity.conversation?.id || 'unknown';
+  const rawChannelId = activity.conversation?.id || 'unknown';
+  // Strip ;messageid=... suffix — present in channel messages but not stable
+  const channelId = rawChannelId.replace(/;messageid=.*$/, '');
   return `teams:${tenantId}:${channelId}`;
 }
 
