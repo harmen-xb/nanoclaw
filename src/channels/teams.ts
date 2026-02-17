@@ -118,6 +118,15 @@ export class TeamsChannel implements Channel {
       let content = activity.text || '';
       // Remove <at>BotName</at> mentions
       content = content.replace(/<at>[^<]*<\/at>/g, '').trim();
+      // If the message has an attachment but no text, default to a description prompt
+      // (Teams often sends image-only messages with no caption)
+      const hasAttachments = (activity.attachments || []).some(a =>
+        a.contentType?.startsWith('image/') ||
+        a.contentType === 'application/vnd.microsoft.teams.file.download.info'
+      );
+      if (!content && hasAttachments) {
+        content = 'Please describe this image.';
+      }
       // If message still doesn't start with trigger, prepend it
       if (!TRIGGER_PATTERN.test(content)) {
         content = `@${ASSISTANT_NAME} ${content}`;
