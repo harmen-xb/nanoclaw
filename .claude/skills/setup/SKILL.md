@@ -116,14 +116,20 @@ If AUTH_STATUS=already_authenticated → skip ahead.
 - 515 → Stream error during pairing. The auth script handles reconnection, but if it persists, re-run the auth script.
 - timeout → Auth took too long. Ask user if they scanned/entered the code, offer to retry.
 
-## 6. Configure Trigger and Channel Type
+## 6. Configure Agent Name, Trigger and Channel Type
 
 First, determine the phone number situation. Get the bot's WhatsApp number from `store/auth/creds.json`:
 `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
 AskUserQuestion: Does the bot share your personal WhatsApp number, or does it have its own dedicated phone number?
 
-AskUserQuestion: What trigger word? (default: Andy). In group chats, messages starting with @TriggerWord go to Claude. In the main channel, no prefix needed.
+AskUserQuestion: What is the agent's name? This is the name the agent will use to identify itself (e.g. "Haimen" for Harmen, "Jaicob" for Jacob). It will also be used as the subdomain for Cloudflare Tunnel (e.g. `haimen.yourdomain.com`). Default: Andy.
+
+- Write `ASSISTANT_NAME=<name>` to `.env`
+- Note the lowercased name as the recommended Cloudflare subdomain: `<lowercase-name>.<domain>`
+- Update `groups/main/CLAUDE.md` — change the assistant name in the first line and the self-introduction sentence
+
+AskUserQuestion: What trigger word? (default: same as agent name). In group chats, messages starting with @TriggerWord go to Claude. In the main channel, no prefix needed.
 
 AskUserQuestion: Main channel type? (options depend on phone number setup)
 
@@ -158,7 +164,9 @@ Run `./.claude/skills/setup/scripts/06-register-channel.sh` with args:
 - `--trigger "@TriggerWord"` — from step 6
 - `--folder "main"` — always "main" for the first channel
 - `--no-trigger-required` — if personal chat, DM, or solo group
-- `--assistant-name "Name"` — if trigger word differs from "Andy"
+- `--assistant-name "Name"` — always pass the agent name from step 6
+
+After registering, remind the user: if they plan to use Microsoft Teams, the Cloudflare Tunnel subdomain should match the agent name (e.g. `haimen.crossmodel.org`). They can run the `/add-cloudflare-tunnel` skill to set this up.
 
 ## 9. Mount Allowlist
 

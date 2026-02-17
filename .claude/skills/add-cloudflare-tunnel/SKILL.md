@@ -11,6 +11,15 @@ This skill sets up a **named Cloudflare Tunnel** — a permanent, fixed HTTPS UR
 - Expose the Teams bot HTTP server (port 3978) to Azure Bot Service
 - One Cloudflare account → multiple tunnels for multiple nanoclaw instances
 
+## Naming Convention
+
+Agent names follow a phonetic AI twist on the user's real name:
+- Harmen → *Haimen* → `haimen.crossmodel.org`
+- Jacob → *Jaicob* → `jaicob.crossmodel.org`
+- Willem → *Waillem* → `waillem.crossmodel.org`
+
+The subdomain should match `ASSISTANT_NAME` (lowercased) from `.env`. The setup skill asks for the agent name during installation — use that same name here for the subdomain.
+
 ## Prerequisites
 
 - A Cloudflare account (free at cloudflare.com)
