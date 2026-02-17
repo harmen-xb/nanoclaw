@@ -5,7 +5,7 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ONLY', 'TEAMS_APP_ID', 'TEAMS_APP_SECRET', 'TEAMS_PORT', 'TEAMS_TENANT_ID']);
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ONLY', 'TEAMS_APP_ID', 'TEAMS_APP_SECRET', 'TEAMS_PORT', 'TEAMS_TENANT_ID', 'CLOUDFLARE_TUNNEL_NAME', 'CLOUDFLARE_TUNNEL_ID', 'CLOUDFLARE_TUNNEL_DOMAIN', 'CLOUDFLARE_TUNNEL_SUBDOMAIN']);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -24,6 +24,14 @@ export const TEAMS_PORT = parseInt(
 );
 export const TEAMS_TENANT_ID =
   process.env.TEAMS_TENANT_ID || envConfig.TEAMS_TENANT_ID || '';
+export const CLOUDFLARE_TUNNEL_NAME =
+  process.env.CLOUDFLARE_TUNNEL_NAME || envConfig.CLOUDFLARE_TUNNEL_NAME || '';
+export const CLOUDFLARE_TUNNEL_ID =
+  process.env.CLOUDFLARE_TUNNEL_ID || envConfig.CLOUDFLARE_TUNNEL_ID || '';
+export const CLOUDFLARE_TUNNEL_DOMAIN =
+  process.env.CLOUDFLARE_TUNNEL_DOMAIN || envConfig.CLOUDFLARE_TUNNEL_DOMAIN || '';
+export const CLOUDFLARE_TUNNEL_SUBDOMAIN =
+  process.env.CLOUDFLARE_TUNNEL_SUBDOMAIN || envConfig.CLOUDFLARE_TUNNEL_SUBDOMAIN || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

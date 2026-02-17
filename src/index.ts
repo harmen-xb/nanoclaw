@@ -4,6 +4,10 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CLOUDFLARE_TUNNEL_DOMAIN,
+  CLOUDFLARE_TUNNEL_ID,
+  CLOUDFLARE_TUNNEL_NAME,
+  CLOUDFLARE_TUNNEL_SUBDOMAIN,
   DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -11,10 +15,12 @@ import {
   TELEGRAM_BOT_TOKEN,
   TEAMS_APP_ID,
   TEAMS_APP_SECRET,
+  TEAMS_PORT,
   TRIGGER_PATTERN,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { TeamsChannel } from './channels/teams.js';
+import { CloudflareTunnel } from './cloudflare-tunnel.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -444,9 +450,23 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start Cloudflare tunnel if configured
+  let cloudflareTunnel: CloudflareTunnel | null = null;
+  if (CLOUDFLARE_TUNNEL_NAME && CLOUDFLARE_TUNNEL_ID && CLOUDFLARE_TUNNEL_DOMAIN && CLOUDFLARE_TUNNEL_SUBDOMAIN) {
+    cloudflareTunnel = new CloudflareTunnel({
+      tunnelName: CLOUDFLARE_TUNNEL_NAME,
+      tunnelId: CLOUDFLARE_TUNNEL_ID,
+      subdomain: CLOUDFLARE_TUNNEL_SUBDOMAIN,
+      domain: CLOUDFLARE_TUNNEL_DOMAIN,
+      port: TEAMS_PORT,
+    });
+    cloudflareTunnel.start();
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    cloudflareTunnel?.stop();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
