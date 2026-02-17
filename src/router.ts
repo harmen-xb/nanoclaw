@@ -16,6 +16,16 @@ export function formatMessages(messages: NewMessage[]): string {
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
+export function extractMediaFromMessages(messages: NewMessage[]): { type: string; data: string; mediaType: string } | undefined {
+  // Find the first message with media
+  for (const msg of messages) {
+    if (msg.media) {
+      return msg.media;
+    }
+  }
+  return undefined;
+}
+
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }

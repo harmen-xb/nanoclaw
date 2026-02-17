@@ -27,6 +27,11 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  media?: {
+    type: string;
+    data: string;
+    mediaType: string;
+  };
 }
 
 interface ContainerOutput {
@@ -47,9 +52,14 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | string
+  | { type: 'text'; text: string }
+  | { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -67,10 +77,12 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(text: string): void;
+  push(content: ContentBlock[]): void;
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -293,25 +305,52 @@ function shouldClose(): boolean {
   return false;
 }
 
+interface IPCMessage {
+  text?: string;
+  media?: {
+    type: string;
+    data: string;
+    mediaType: string;
+  };
+}
+
 /**
  * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
+ * Returns messages (text or content blocks) found, or empty array.
  */
-function drainIpcInput(): string[] {
+function drainIpcInput(): (string | ContentBlock[])[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs.readdirSync(IPC_INPUT_DIR)
       .filter(f => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: (string | ContentBlock[])[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+        if (data.type === 'message') {
+          const ipcMsg = data as { type: string } & IPCMessage;
+          if (ipcMsg.media) {
+            // Build content blocks with text and media
+            const blocks: ContentBlock[] = [];
+            if (ipcMsg.text) {
+              blocks.push({ type: 'text', text: ipcMsg.text });
+            }
+            blocks.push({
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: ipcMsg.media.mediaType,
+                data: ipcMsg.media.data,
+              },
+            });
+            messages.push(blocks);
+          } else if (ipcMsg.text) {
+            messages.push(ipcMsg.text);
+          }
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -327,9 +366,9 @@ function drainIpcInput(): string[] {
 
 /**
  * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Returns the messages (text or content blocks), or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+function waitForIpcMessage(): Promise<(string | ContentBlock[])[] | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -338,7 +377,7 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(messages);
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -354,7 +393,7 @@ function waitForIpcMessage(): Promise<string | null> {
  * Also pipes IPC messages into the stream during the query.
  */
 async function runQuery(
-  prompt: string,
+  prompt: string | (string | ContentBlock[])[],
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
@@ -362,7 +401,32 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+
+  // If prompt is already an array (from IPC with media), push each part
+  if (Array.isArray(prompt)) {
+    for (const item of prompt) {
+      if (typeof item === 'string') {
+        stream.push(item);
+      } else {
+        stream.push(item);
+      }
+    }
+  } else if (containerInput.media) {
+    // Initial prompt with media attachment — send as content blocks
+    stream.push([
+      { type: 'text', text: prompt },
+      {
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: containerInput.media.mediaType,
+          data: containerInput.media.data,
+        },
+      },
+    ]);
+  } else {
+    stream.push(prompt);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -377,9 +441,14 @@ async function runQuery(
       return;
     }
     const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    for (const msg of messages) {
+      if (typeof msg === 'string') {
+        log(`Piping IPC message into active query (${msg.length} chars)`);
+        stream.push(msg);
+      } else {
+        log(`Piping IPC message with media into active query`);
+        stream.push(msg);
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -524,14 +593,20 @@ async function main(): Promise<void> {
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
-  let prompt = containerInput.prompt;
+  let prompt: string | (string | ContentBlock[])[] = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    const hasMedia = pending.some(p => typeof p !== 'string');
+    if (hasMedia) {
+      // Mixed strings and content blocks — use array format
+      prompt = [prompt as string, ...pending];
+    } else {
+      prompt += '\n' + (pending as string[]).join('\n');
+    }
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
@@ -568,7 +643,7 @@ async function main(): Promise<void> {
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      log(`Got ${nextMessage.length} new message part(s), starting new query`);
       prompt = nextMessage;
     }
   } catch (err) {

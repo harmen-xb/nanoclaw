@@ -41,6 +41,13 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface MediaContent {
+  type: 'audio' | 'image' | 'video' | 'document';
+  data: string; // base64 encoded
+  mediaType: string; // MIME type
+  filename?: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -50,6 +57,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  media?: MediaContent; // Optional media attachment
 }
 
 export interface ScheduledTask {
@@ -78,6 +86,11 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export interface QuestionOption {
+  label: string;
+  value: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -87,6 +100,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: send a question with inline button options.
+  sendQuestion?(jid: string, question: string, options: QuestionOption[]): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
