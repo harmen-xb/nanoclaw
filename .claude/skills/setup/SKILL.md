@@ -166,7 +166,7 @@ Run `./.claude/skills/setup/scripts/06-register-channel.sh` with args:
 - `--no-trigger-required` — if personal chat, DM, or solo group
 - `--assistant-name "Name"` — always pass the agent name from step 6
 
-After registering, remind the user: if they plan to use Microsoft Teams, the Cloudflare Tunnel subdomain should match the agent name (e.g. `haimen.crossmodel.org`). They can run the `/add-cloudflare-tunnel` skill to set this up.
+After registering, remind the user: if they plan to use Microsoft Teams, the Cloudflare Tunnel subdomain should match the agent name (e.g. `haimen.crossmodel.org`) and the tunnel should be named `nanoclaw-<agentname>` (e.g. `nanoclaw-haimen`). They can run the `/add-cloudflare-tunnel` skill to set this up.
 
 ## 9. Mount Allowlist
 

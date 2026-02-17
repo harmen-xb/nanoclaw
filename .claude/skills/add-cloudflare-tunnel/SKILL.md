@@ -20,6 +20,16 @@ Agent names follow a phonetic AI twist on the user's real name:
 
 The subdomain should match `ASSISTANT_NAME` (lowercased) from `.env`. The setup skill asks for the agent name during installation — use that same name here for the subdomain.
 
+### Tunnel naming convention
+
+Tunnels follow the pattern `nanoclaw-<agentname>` (lowercase). This makes it immediately clear which nanoclaw instance the tunnel belongs to:
+
+| Agent | Tunnel name | Subdomain |
+|-------|-------------|-----------|
+| Haimen (Harmen) | `nanoclaw-haimen` | `haimen.crossmodel.org` |
+| Jaicob (Jacob) | `nanoclaw-jaicob` | `jaicob.crossmodel.org` |
+| Waillem (Willem) | `nanoclaw-waillem` | `waillem.crossmodel.org` |
+
 ## Prerequisites
 
 - A Cloudflare account (free at cloudflare.com)
@@ -68,7 +78,7 @@ Run in WSL2 (or wherever nanoclaw runs):
 # Login (opens browser, select your domain)
 cloudflared tunnel login
 
-# Create a named tunnel (pick a name per instance, e.g. nanoclaw-home, nanoclaw-work)
+# Create a named tunnel (pick a name per instance, e.g. nanoclaw-<agentname>, nanoclaw-work)
 cloudflared tunnel create <tunnel-name>
 ```
 
@@ -104,7 +114,7 @@ ingress:
 ```bash
 cloudflared tunnel route dns <tunnel-name> <subdomain>.<domain>
 # e.g.
-cloudflared tunnel route dns nanoclaw-home clai.crossmodel.org
+cloudflared tunnel route dns nanoclaw-<agentname> clai.crossmodel.org
 ```
 
 This creates a CNAME record in Cloudflare DNS automatically.
@@ -153,7 +163,7 @@ For multiple nanoclaw instances, each gets its own named tunnel:
 
 | Instance | Tunnel name | Subdomain | Port |
 |----------|-------------|-----------|------|
-| Home | nanoclaw-home | clai-home.crossmodel.org | 3978 |
+| Home | nanoclaw-<agentname> | clai-home.crossmodel.org | 3978 |
 | Work | nanoclaw-work | clai-work.crossmodel.org | 3979 |
 
 Each instance sets a different `TEAMS_PORT` in its `.env` and the tunnel config points to that port.
