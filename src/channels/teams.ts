@@ -100,6 +100,20 @@ export class TeamsChannel implements Channel {
       const activity = context.activity;
       const jid = toTeamsJid(activity);
 
+      // Debug: log full attachment info so we can see what Teams actually sends
+      logger.info({
+        jid,
+        text: activity.text?.slice(0, 100),
+        attachmentCount: (activity.attachments || []).length,
+        attachments: (activity.attachments || []).map(a => ({
+          contentType: a.contentType,
+          name: a.name,
+          hasContentUrl: !!a.contentUrl,
+          hasContent: !!a.content,
+          contentKeys: a.content ? Object.keys(a.content as any) : [],
+        })),
+      }, 'Teams activity received');
+
       // Store conversation reference for proactive messaging
       this.conversationRefs.set(jid, TurnContext.getConversationReference(activity));
 
