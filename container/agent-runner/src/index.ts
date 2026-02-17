@@ -55,7 +55,17 @@ interface SessionsIndex {
 type ContentBlock =
   | string
   | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
+
+function mediaContentBlock(mediaType: string, data: string): ContentBlock {
+  // Claude requires type:'image' for images, type:'document' for everything else
+  const isImage = mediaType.startsWith('image/');
+  return {
+    type: isImage ? 'image' : 'document',
+    source: { type: 'base64', media_type: mediaType, data },
+  } as ContentBlock;
+}
 
 interface SDKUserMessage {
   type: 'user';
@@ -339,14 +349,7 @@ function drainIpcInput(): (string | ContentBlock[])[] {
             if (ipcMsg.text) {
               blocks.push({ type: 'text', text: ipcMsg.text });
             }
-            blocks.push({
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: ipcMsg.media.mediaType,
-                data: ipcMsg.media.data,
-              },
-            });
+            blocks.push(mediaContentBlock(ipcMsg.media.mediaType, ipcMsg.media.data));
             messages.push(blocks);
           } else if (ipcMsg.text) {
             messages.push(ipcMsg.text);
@@ -415,14 +418,7 @@ async function runQuery(
     // Initial prompt with media attachment — send as content blocks
     stream.push([
       { type: 'text', text: prompt },
-      {
-        type: 'document',
-        source: {
-          type: 'base64',
-          media_type: containerInput.media.mediaType,
-          data: containerInput.media.data,
-        },
-      },
+      mediaContentBlock(containerInput.media.mediaType, containerInput.media.data),
     ]);
   } else {
     stream.push(prompt);
