@@ -125,7 +125,7 @@ export class TeamsChannel implements Channel {
         a.contentType === 'application/vnd.microsoft.teams.file.download.info'
       );
       if (!content && hasAttachments) {
-        content = 'Please describe this image.';
+        content = 'What would you like me to do with this image?';
       }
       // If message still doesn't start with trigger, prepend it
       if (!TRIGGER_PATTERN.test(content)) {
