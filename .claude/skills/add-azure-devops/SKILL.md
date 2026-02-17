@@ -1,0 +1,246 @@
+---
+name: add-azure-devops
+description: Add Azure DevOps integration. Enables querying work items (stories, bugs, tasks), reading sprint backlogs, posting comments, and investigating issues using WIQL queries. Requires an Azure DevOps PAT token.
+---
+
+# Add Azure DevOps Integration
+
+This skill adds Azure DevOps support to the agent, enabling it to:
+
+- Browse and query work items (stories, bugs, tasks, epics)
+- List current sprint items and filter by status, type, assignee
+- Sort by Stack Rank / priority
+- Post investigation comments on work items (HTML formatted)
+- Retrieve work item descriptions and acceptance criteria
+- Run WIQL (Work Item Query Language) queries
+
+## Prerequisites
+
+### 1. Create a Personal Access Token (PAT)
+
+Tell the user:
+
+> I need an Azure DevOps Personal Access Token (PAT) to access your backlog. Here's how to create one:
+>
+> 1. Go to your Azure DevOps organization (e.g., `https://dev.azure.com/your-org`)
+> 2. Click your profile icon (top right) → **Personal access tokens**
+> 3. Click **New Token**
+> 4. Name: `nanoclaw-agent` (or any name)
+> 5. Organization: Select your org
+> 6. Expiration: 1 year recommended
+> 7. Scopes: Select **Work Items** → **Read & Write**
+> 8. Click **Create** and copy the token (shown only once!)
+>
+> You can create the token under a dedicated service account (e.g., `devops@yourcompany.com`) or your personal account.
+
+Wait for the user to provide the PAT and their Azure DevOps organization name/URL.
+
+### 2. Find Your Organization and Project
+
+Ask the user:
+
+> What is your Azure DevOps:
+> 1. **Organization name** (the part in `https://dev.azure.com/{organization}`)
+> 2. **Project name** (e.g., "CrossModel", "MyProject")
+
+## Configuration
+
+### Step 1: Add Environment Variables
+
+Add to `.env`:
+
+```bash
+AZURE_DEVOPS_PAT=your_pat_token_here
+AZURE_DEVOPS_ORG=your-org-name
+AZURE_DEVOPS_PROJECT=YourProject
+```
+
+Sync to container environment:
+
+```bash
+cp .env data/env/env
+```
+
+The container reads from `data/env/env`, not `.env` directly.
+
+### Step 2: Update CLAUDE.md for the Group
+
+Read the group's `CLAUDE.md` file (e.g., `groups/main/CLAUDE.md`) and add an Azure DevOps section so the agent knows how to use it:
+
+```markdown
+## Azure DevOps
+
+Connected to Azure DevOps at `https://dev.azure.com/{AZURE_DEVOPS_ORG}`.
+Project: `{AZURE_DEVOPS_PROJECT}`
+
+Use the Bash tool with `curl` to interact with the Azure DevOps REST API.
+Authentication: `-u ":${AZURE_DEVOPS_PAT}"` (PAT is in environment).
+
+### Common Operations
+
+**List projects:**
+```bash
+curl -s "https://dev.azure.com/${AZURE_DEVOPS_ORG}/_apis/projects?api-version=7.1" \
+  -u ":${AZURE_DEVOPS_PAT}" | python3 -c "import sys,json; [print(p['name']) for p in json.load(sys.stdin)['value']]"
+```
+
+**Get current sprint work items (WIQL):**
+```bash
+curl -s -X POST "https://dev.azure.com/${AZURE_DEVOPS_ORG}/${AZURE_DEVOPS_PROJECT}/_apis/wit/wiql?api-version=7.1" \
+  -u ":${AZURE_DEVOPS_PAT}" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[Microsoft.VSTS.Common.StackRank] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.IterationPath] = @currentIteration([Team]) AND [System.WorkItemType] IN (\"User Story\",\"Bug\",\"Task\") ORDER BY [Microsoft.VSTS.Common.StackRank]"}' | python3 -c "
+import sys,json
+data = json.load(sys.stdin)
+for item in data.get('workItems', []):
+    print(item['id'])
+"
+```
+
+**Get work item details:**
+```bash
+curl -s "https://dev.azure.com/${AZURE_DEVOPS_ORG}/${AZURE_DEVOPS_PROJECT}/_apis/wit/workitems/{id}?api-version=7.1&\$expand=all" \
+  -u ":${AZURE_DEVOPS_PAT}" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+f = d['fields']
+print('Title:', f.get('System.Title',''))
+print('State:', f.get('System.State',''))
+print('Type:', f.get('System.WorkItemType',''))
+print('Assigned:', f.get('System.AssignedTo',{}).get('displayName','Unassigned'))
+print('Stack Rank:', f.get('Microsoft.VSTS.Common.StackRank',''))
+print('Description:', f.get('System.Description',''))
+"
+```
+
+**Post a comment on a work item:**
+```bash
+# Write comment JSON to temp file to avoid escaping issues
+python3 -c "
+import json
+text = '''YOUR HTML COMMENT HERE'''
+print(json.dumps({'text': text}))
+" > /tmp/comment.json
+
+curl -s -X POST "https://dev.azure.com/${AZURE_DEVOPS_ORG}/${AZURE_DEVOPS_PROJECT}/_apis/wit/workitems/{id}/comments?api-version=7.1-preview.3" \
+  -u ":${AZURE_DEVOPS_PAT}" \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/comment.json | python3 -c "import sys,json; d=json.load(sys.stdin); print('Comment ID:', d.get('id','ERROR'))"
+```
+
+### Comment Formatting
+
+Always format investigation comments with this structure:
+
+```html
+<div style="padding: 8px 12px; background-color: #e3f2fd; border-left: 4px solid #2196f3; margin-bottom: 12px;">
+  <strong>🤖 AI Investigation Report</strong><br/>
+  <em style="color: #666;">This comment was automatically generated by an AI agent. Please review findings before implementing changes.</em>
+</div>
+<h3>Root Cause Analysis</h3>
+<p>...</p>
+<h4>Key Findings:</h4>
+<ol>
+  <li><strong>Finding 1</strong>: ...</li>
+</ol>
+<h4>Solution Approach:</h4>
+<ol>
+  <li>...</li>
+</ol>
+```
+
+### Sprint Discovery
+
+To find the current sprint name and iteration path, use:
+
+```bash
+curl -s "https://dev.azure.com/${AZURE_DEVOPS_ORG}/${AZURE_DEVOPS_PROJECT}/_apis/work/teamsettings/iterations?api-version=7.1&\$timeframe=current" \
+  -u ":${AZURE_DEVOPS_PAT}" | python3 -c "
+import sys,json
+data = json.load(sys.stdin)
+for it in data.get('value', []):
+    print('Name:', it['name'])
+    print('Path:', it['path'])
+    print('Start:', it.get('attributes',{}).get('startDate',''))
+    print('End:', it.get('attributes',{}).get('finishDate',''))
+"
+```
+
+### Work Item Types
+
+Common work item types in Azure DevOps:
+- `User Story` — feature requirements
+- `Bug` — defects
+- `Task` — implementation tasks
+- `Epic` — large feature groupings
+- `Feature` — medium-sized features
+
+### Status Values
+
+Common states (vary by process template):
+- `New` / `Active` / `Resolved` / `Closed`
+- `Ready` — refined and ready for development
+- `In Progress` / `In Review`
+- `Done`
+
+### Priority Sorting
+
+Work items have a `Microsoft.VSTS.Common.StackRank` field — lower value = higher priority. Always sort by this when presenting ordered lists.
+```
+```
+
+## Verification
+
+After setup, verify the connection works:
+
+```bash
+AZURE_DEVOPS_PAT=$(grep AZURE_DEVOPS_PAT /workspace/project/.env | cut -d'=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
+AZURE_DEVOPS_ORG=$(grep AZURE_DEVOPS_ORG /workspace/project/.env | cut -d'=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
+
+curl -s "https://dev.azure.com/${AZURE_DEVOPS_ORG}/_apis/projects?api-version=7.1" \
+  -u ":${AZURE_DEVOPS_PAT}" | python3 -c "
+import sys,json
+data = json.load(sys.stdin)
+projects = data.get('value', [])
+print(f'Connected! Found {len(projects)} project(s):')
+for p in projects:
+    print(f'  - {p[\"name\"]}')
+"
+```
+
+If successful, tell the user the connection is working and list the available projects.
+
+## Usage Examples
+
+Once set up, the agent can:
+
+- "What bugs are in the current sprint?" → WIQL query filtered by type and iteration
+- "Show me unassigned Ready bugs sorted by priority" → filter by state + assignee + Stack Rank
+- "Investigate bug 1234 and add a comment" → fetch details, read code, post findings
+- "What stories are in the backlog for next sprint?" → query by iteration path
+
+## Troubleshooting
+
+### 401 Unauthorized
+
+- PAT may have expired or insufficient scopes
+- Ensure PAT has at least **Work Items: Read** scope
+- Verify org name is correct (case-sensitive)
+
+### Empty results
+
+- Check `AZURE_DEVOPS_PROJECT` matches the exact project name
+- For WIQL queries using `@currentIteration`, ensure a team is configured with sprints
+
+### Comment not formatting correctly
+
+- Azure DevOps comments accept HTML — use HTML tags not markdown
+- Write JSON to a temp file with `python3 -c "import json; ..."` to avoid shell escaping issues
+
+## Removal
+
+To remove Azure DevOps integration:
+
+1. Remove from `.env`: `AZURE_DEVOPS_PAT`, `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`
+2. Sync: `cp .env data/env/env`
+3. Remove the Azure DevOps section from the group's `CLAUDE.md`
