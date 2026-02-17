@@ -15,8 +15,9 @@ Run setup scripts automatically. Only pause when user action is required (WhatsA
 
 Run `./.claude/skills/setup/scripts/01-check-environment.sh` and parse the status block.
 
-- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
+- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 7a
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
+- If TEAMS_APP_ID is set in `.env` → note that Teams is already configured
 - Record PLATFORM, APPLE_CONTAINER, and DOCKER values for step 3
 
 **If NODE_OK=false:**
@@ -98,9 +99,32 @@ Do NOT ask the user to paste the token into the chat. Do NOT use AskUserQuestion
 
 **API key:** Tell the user to add `ANTHROPIC_API_KEY=<key>` to the `.env` file in the project root, then let you know when done. Once confirmed, verify the `.env` file has the key.
 
-## 5. WhatsApp Authentication
+## 5. Choose Communication Platform
 
-If HAS_AUTH=true from step 1, confirm with user: "WhatsApp credentials already exist. Want to keep them or re-authenticate?" If keeping, skip to step 6.
+AskUserQuestion (multiSelect: true): Which platform(s) will you use to chat with the agent?
+
+Options:
+- **WhatsApp** — via your personal number or a dedicated bot number
+- **Microsoft Teams** — via a registered Azure Bot, exposed through a Cloudflare Tunnel
+- **Telegram** — via a Telegram Bot token
+
+Note which platforms were selected — only run the relevant steps below.
+
+## 6. Configure Agent Name
+
+AskUserQuestion: What is the agent's name? This is the name the agent will use to identify itself (e.g. "Haimen" for Harmen, "Jaicob" for Jacob). It will also be used as the subdomain for Cloudflare Tunnel (e.g. `haimen.yourdomain.com`). Default: Andy.
+
+- Write `ASSISTANT_NAME=<name>` to `.env`
+- Note the lowercased name as the recommended Cloudflare subdomain: `<lowercase-name>.<domain>`
+- Update `groups/main/CLAUDE.md` — change the assistant name in the first line and the self-introduction sentence
+
+## 7. WhatsApp Setup (if WhatsApp selected)
+
+Skip this entire section if WhatsApp was not selected in step 5.
+
+### 7a. Authenticate WhatsApp
+
+If HAS_AUTH=true from step 1, confirm with user: "WhatsApp credentials already exist. Want to keep them or re-authenticate?" If keeping, skip to 7b.
 
 AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
 
@@ -116,18 +140,12 @@ If AUTH_STATUS=already_authenticated → skip ahead.
 - 515 → Stream error during pairing. The auth script handles reconnection, but if it persists, re-run the auth script.
 - timeout → Auth took too long. Ask user if they scanned/entered the code, offer to retry.
 
-## 6. Configure Agent Name, Trigger and Channel Type
+### 7b. Configure Channel Type
 
 First, determine the phone number situation. Get the bot's WhatsApp number from `store/auth/creds.json`:
 `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
 AskUserQuestion: Does the bot share your personal WhatsApp number, or does it have its own dedicated phone number?
-
-AskUserQuestion: What is the agent's name? This is the name the agent will use to identify itself (e.g. "Haimen" for Harmen, "Jaicob" for Jacob). It will also be used as the subdomain for Cloudflare Tunnel (e.g. `haimen.yourdomain.com`). Default: Andy.
-
-- Write `ASSISTANT_NAME=<name>` to `.env`
-- Note the lowercased name as the recommended Cloudflare subdomain: `<lowercase-name>.<domain>`
-- Update `groups/main/CLAUDE.md` — change the assistant name in the first line and the self-introduction sentence
 
 AskUserQuestion: What trigger word? (default: same as agent name). In group chats, messages starting with @TriggerWord go to Claude. In the main channel, no prefix needed.
 
@@ -143,32 +161,111 @@ AskUserQuestion: Main channel type? (options depend on phone number setup)
 
 Do NOT show options that don't apply to the user's setup. For example, don't offer "DM with the bot" if the bot shares the user's number (you can't DM yourself on WhatsApp).
 
-## 7. Sync and Select Group (If Group Channel)
+### 7c. Sync and Select Group (if group channel)
 
-**For personal chat:** The JID is the bot's own phone number from step 6. Construct as `NUMBER@s.whatsapp.net`.
+**For personal chat:** The JID is the bot's own phone number from 7b. Construct as `NUMBER@s.whatsapp.net`.
 
 **For DM with bot's dedicated number:** Ask for the bot's phone number, construct JID as `NUMBER@s.whatsapp.net`.
 
 **For group (solo or with bot):**
 1. Run `./.claude/skills/setup/scripts/05-sync-groups.sh` (Bash timeout: 60000ms)
 2. **If BUILD=failed:** Read `logs/setup.log`, fix the TypeScript error, re-run.
-3. **If GROUPS_IN_DB=0:** Check `logs/setup.log` for the sync output. Common causes: WhatsApp auth expired (re-run step 5), connection timeout (re-run sync script with longer timeout).
+3. **If GROUPS_IN_DB=0:** Check `logs/setup.log` for the sync output. Common causes: WhatsApp auth expired (re-run 7a), connection timeout (re-run sync script with longer timeout).
 4. Run `./.claude/skills/setup/scripts/05b-list-groups.sh` to get groups (pipe-separated JID|name lines). Do NOT display the output to the user.
 5. Pick the most likely candidates (e.g. groups with the trigger word or "NanoClaw" in the name, small/solo groups) and present them as AskUserQuestion options — show names only, not JIDs. Include an "Other" option if their group isn't listed. If they pick Other, search by name in the DB or re-run with a higher limit.
 
-## 8. Register Channel
+### 7d. Register WhatsApp Channel
 
 Run `./.claude/skills/setup/scripts/06-register-channel.sh` with args:
-- `--jid "JID"` — from step 7
+- `--jid "JID"` — from step 7c
 - `--name "main"` — always "main" for the first channel
-- `--trigger "@TriggerWord"` — from step 6
+- `--trigger "@TriggerWord"` — from step 7b
 - `--folder "main"` — always "main" for the first channel
 - `--no-trigger-required` — if personal chat, DM, or solo group
 - `--assistant-name "Name"` — always pass the agent name from step 6
 
-After registering, remind the user: if they plan to use Microsoft Teams, the Cloudflare Tunnel subdomain should match the agent name (e.g. `haimen.crossmodel.org`) and the tunnel should be named `nanoclaw-<agentname>` (e.g. `nanoclaw-haimen`). They can run the `/add-cloudflare-tunnel` skill to set this up.
+## 8. Microsoft Teams Setup (if Teams selected)
 
-## 9. Mount Allowlist
+Skip this entire section if Teams was not selected in step 5.
+
+Teams uses **auto-registration**: when the first message arrives, the channel is automatically registered. There's no need to manually look up or register a JID. All you need to configure is credentials and a public HTTPS endpoint.
+
+### 8a. Azure Bot credentials
+
+Tell the user to add these to the `.env` file:
+
+```
+TEAMS_APP_ID=<your-bot-app-id>
+TEAMS_APP_SECRET=<your-bot-app-secret>
+TEAMS_TENANT_ID=<your-azure-tenant-id>
+```
+
+**Where to find these:**
+- Go to [Azure Portal](https://portal.azure.com) → Azure Bot → your bot → Configuration
+- App ID and secret: under the bot's Microsoft App settings (App registrations → your bot app → Certificates & secrets)
+- Tenant ID: Azure Portal → Azure Active Directory → Overview
+
+Once the user confirms they've added them, verify the `.env` file has all three values.
+
+### 8b. Cloudflare Tunnel (public HTTPS endpoint)
+
+Teams requires a public HTTPS URL to reach the bot. Run the `/add-cloudflare-tunnel` skill to set this up — it will configure a named tunnel with a permanent URL like `haimen.crossmodel.org`.
+
+The tunnel naming convention:
+- Tunnel name: `nanoclaw-<agentname>` (e.g. `nanoclaw-haimen`)
+- Subdomain: `<agentname>.<domain>` (e.g. `haimen.crossmodel.org`)
+
+After the tunnel is set up, tell the user to update the Azure Bot messaging endpoint to:
+`https://<agentname>.<domain>/api/messages`
+
+### 8c. Teams App Manifest
+
+The user needs to install the bot as a Teams app. A manifest zip can be created with:
+
+```json
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "<TEAMS_APP_ID>",
+  "packageName": "com.nanoclaw.<agentname>",
+  "developer": { "name": "NanoClaw", "websiteUrl": "https://<subdomain>.<domain>", "privacyUrl": "https://<subdomain>.<domain>", "termsOfUseUrl": "https://<subdomain>.<domain>" },
+  "name": { "short": "<AgentName>", "full": "<AgentName> - AI Assistant" },
+  "description": { "short": "AI assistant", "full": "NanoClaw AI assistant" },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#FFFFFF",
+  "bots": [{ "botId": "<TEAMS_APP_ID>", "scopes": ["personal", "team", "groupChat"], "isNotificationOnly": false }],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["<subdomain>.<domain>"]
+}
+```
+
+Create the zip with manifest.json + icon files and upload via Teams Admin Center or directly in Teams (Apps → Manage your apps → Upload an app).
+
+### 8d. Auto-registration
+
+No further registration is needed. When the user sends the first message to the bot in Teams:
+- **Personal DM**: auto-registered as the main channel (full admin privileges, no trigger needed)
+- **Team channel**: auto-registered as a separate channel (`teams-<channelname>` folder, requires `@<AgentName>` trigger)
+
+The main channel (personal DM) gets the same admin capabilities as the WhatsApp or Telegram main channel.
+
+## 9. Telegram Setup (if Telegram selected)
+
+Skip this entire section if Telegram was not selected in step 5.
+
+Tell the user to:
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts
+3. Copy the bot token it provides
+4. Add to `.env`: `TELEGRAM_BOT_TOKEN=<token>`
+5. Let you know when done
+
+Once confirmed, verify the `.env` file has the `TELEGRAM_BOT_TOKEN` value.
+
+Telegram channels auto-register on first message — no manual JID registration needed.
+
+## 10. Mount Allowlist
 
 AskUserQuestion: Want the agent to access directories outside the NanoClaw project? (Git repos, project folders, documents, etc.)
 
@@ -180,7 +277,7 @@ AskUserQuestion: Want the agent to access directories outside the NanoClaw proje
 
 Tell user how to grant a group access: add `containerConfig.additionalMounts` to their entry in `data/registered_groups.json`.
 
-## 10. Start Service
+## 11. Start Service
 
 If the service is already running (check `launchctl list | grep nanoclaw` on macOS), unload it first: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` — then proceed with a clean install.
 
@@ -193,33 +290,40 @@ Run `./.claude/skills/setup/scripts/08-setup-service.sh` and parse the status bl
 - On Linux: check `systemctl --user status nanoclaw` for the error and fix accordingly.
 - Re-run the setup-service script after fixing.
 
-## 11. Verify
+## 12. Verify
 
 Run `./.claude/skills/setup/scripts/09-verify.sh` and parse the status block.
 
+The script checks: service status, container runtime, Claude credentials, WhatsApp auth (if applicable), registered groups, and mount allowlist.
+
 **If STATUS=failed, fix each failing component:**
 - SERVICE=stopped → run `npm run build` first, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux). Re-check.
-- SERVICE=not_found → re-run step 10.
+- SERVICE=not_found → re-run step 11.
 - CREDENTIALS=missing → re-run step 4.
-- WHATSAPP_AUTH=not_found → re-run step 5.
-- REGISTERED_GROUPS=0 → re-run steps 7-8.
+- WHATSAPP_AUTH=not_found → only relevant if WhatsApp was selected in step 5; re-run step 7a.
+- REGISTERED_GROUPS=0 → for WhatsApp, re-run steps 7c-7d. For Teams or Telegram, this is expected at setup time — channels auto-register when the first message arrives.
 - MOUNT_ALLOWLIST=missing → run `./.claude/skills/setup/scripts/07-configure-mounts.sh --empty` to create a default.
 
 After fixing, re-run `09-verify.sh` to confirm everything passes.
 
-Tell user to test: send a message in their registered chat (with or without trigger depending on channel type).
+**Tell user how to test:**
+- **WhatsApp**: send a message in their registered chat (with or without trigger depending on channel type)
+- **Teams**: send the bot a personal DM in Teams — it will auto-register as the main channel on first message
+- **Telegram**: send `/start` or any message to the bot
 
 Show the log tail command: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common causes: wrong Node path in plist (re-run step 10), missing `.env` (re-run step 4), missing WhatsApp auth (re-run step 5).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common causes: wrong Node path in plist (re-run step 11), missing `.env` (re-run step 4), missing WhatsApp auth if using WhatsApp (re-run step 7a).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — start it: `container system start` (Apple Container) or `open -a Docker` (macOS Docker). Check container logs in `groups/main/logs/container-*.log`.
 
 **No response to messages:** Verify the trigger pattern matches. Main channel and personal/solo chats don't need a prefix. Check the registered JID in the database: `sqlite3 store/messages.db "SELECT * FROM registered_groups"`. Check `logs/nanoclaw.log`.
 
-**Messages sent but not received (DMs):** WhatsApp may use LID (Linked Identity) JIDs. Check logs for LID translation. Verify the registered JID has no device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`).
+**Teams: no response to first message:** Check that the bot endpoint is correct in Azure Bot → Configuration. Ensure the Cloudflare tunnel is running (nanoclaw manages it automatically if configured in `.env`). Check `logs/nanoclaw.log` for incoming requests.
+
+**Messages sent but not received (DMs on WhatsApp):** WhatsApp may use LID (Linked Identity) JIDs. Check logs for LID translation. Verify the registered JID has no device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`).
 
 **WhatsApp disconnected:** Run `npm run auth` to re-authenticate, then `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw`.
 

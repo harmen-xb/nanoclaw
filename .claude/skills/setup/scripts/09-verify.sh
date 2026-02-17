@@ -69,6 +69,17 @@ if [ -d "$PROJECT_ROOT/store/auth" ] && [ "$(ls -A "$PROJECT_ROOT/store/auth" 2>
 fi
 log "WhatsApp auth: $WHATSAPP_AUTH"
 
+# Detect configured channels (to make WhatsApp auth check conditional)
+TEAMS_CONFIGURED="false"
+if [ -f "$PROJECT_ROOT/.env" ] && grep -qE "^TEAMS_APP_ID=.+" "$PROJECT_ROOT/.env" 2>/dev/null; then
+  TEAMS_CONFIGURED="true"
+fi
+TELEGRAM_CONFIGURED="false"
+if [ -f "$PROJECT_ROOT/.env" ] && grep -qE "^TELEGRAM_BOT_TOKEN=.+" "$PROJECT_ROOT/.env" 2>/dev/null; then
+  TELEGRAM_CONFIGURED="true"
+fi
+log "Teams configured: $TEAMS_CONFIGURED, Telegram configured: $TELEGRAM_CONFIGURED"
+
 # 5. Check registered groups (in SQLite — the JSON file gets migrated away on startup)
 REGISTERED_GROUPS=0
 if [ -f "$PROJECT_ROOT/store/messages.db" ]; then
@@ -84,8 +95,23 @@ fi
 log "Mount allowlist: $MOUNT_ALLOWLIST"
 
 # Determine overall status
+# WhatsApp auth required only if WhatsApp is the sole channel (no Teams/Telegram configured)
+WHATSAPP_AUTH_REQUIRED="true"
+if [ "$TEAMS_CONFIGURED" = "true" ] || [ "$TELEGRAM_CONFIGURED" = "true" ]; then
+  WHATSAPP_AUTH_REQUIRED="false"
+fi
+
+# Registered groups required only when WhatsApp auth is present (Teams/Telegram auto-register on first message)
+GROUPS_REQUIRED="false"
+if [ "$WHATSAPP_AUTH" = "authenticated" ]; then
+  GROUPS_REQUIRED="true"
+fi
+
 STATUS="success"
-if [ "$SERVICE" != "running" ] || [ "$CREDENTIALS" = "missing" ] || [ "$WHATSAPP_AUTH" = "not_found" ] || [ "$REGISTERED_GROUPS" -eq 0 ] 2>/dev/null; then
+if [ "$SERVICE" != "running" ] || \
+   [ "$CREDENTIALS" = "missing" ] || \
+   ( [ "$WHATSAPP_AUTH_REQUIRED" = "true" ] && [ "$WHATSAPP_AUTH" = "not_found" ] ) || \
+   ( [ "$GROUPS_REQUIRED" = "true" ] && [ "$REGISTERED_GROUPS" -eq 0 ] 2>/dev/null ); then
   STATUS="failed"
 fi
 
