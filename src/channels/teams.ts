@@ -9,7 +9,7 @@ import { Server } from 'http';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN, TEAMS_PORT, TEAMS_TENANT_ID, GROUPS_DIR } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN, TEAMS_PORT, TEAMS_TENANT_ID, GROUPS_DIR, MAIN_GROUP_FOLDER } from '../config.js';
 import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, QuestionOption, RegisteredGroup } from '../types.js';
 
@@ -18,6 +18,7 @@ export interface TeamsChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   onRegisterGroup: (jid: string, group: RegisteredGroup) => void;
+  hasMainTeamsChannel: () => boolean;
   appId: string;
   appSecret: string;
 }
@@ -96,33 +97,51 @@ export class TeamsChannel implements Channel {
 
       let group = this.opts.registeredGroups()[jid];
       if (!group) {
-        // Auto-register new Teams channels on first message
-        const rawName = (activity.channelData as any)?.channel?.name
-          || activity.conversation?.name
-          || 'Teams Channel';
-        const displayName = `Teams - ${rawName}`;
-        // Derive a folder name: lowercase, hyphens, strip special chars
-        const folder = `teams-${rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+        // Personal DM conversations get registered as the main channel (full admin privileges)
+        const isPersonalDm = activity.conversation?.conversationType === 'personal';
+
+        let displayName: string;
+        let folder: string;
+        let requiresTrigger: boolean;
+
+        if (isPersonalDm && !this.opts.hasMainTeamsChannel()) {
+          // First DM becomes the main channel — same folder as Telegram main
+          displayName = `Teams - ${senderName} (main)`;
+          folder = MAIN_GROUP_FOLDER;
+          requiresTrigger = false;
+          logger.info({ jid, senderName }, 'Auto-registering Teams personal DM as main channel');
+        } else {
+          // Regular channel or group chat
+          const rawName = (activity.channelData as any)?.channel?.name
+            || activity.conversation?.name
+            || 'Teams Channel';
+          displayName = `Teams - ${rawName}`;
+          folder = `teams-${rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+          requiresTrigger = false;
+          logger.info({ jid, displayName, folder }, 'Auto-registering new Teams channel');
+        }
+
         group = {
           name: displayName,
           folder,
           trigger: `@${ASSISTANT_NAME}`,
-          requiresTrigger: false,
+          requiresTrigger,
           added_at: new Date().toISOString(),
         };
-        logger.info({ jid, displayName, folder }, 'Auto-registering new Teams channel');
         this.opts.onRegisterGroup(jid, group);
 
-        // Copy CLAUDE.md template from teams-harmen if it exists
-        const templatePath = path.join(GROUPS_DIR, 'teams-harmen', 'CLAUDE.md');
-        const destPath = path.join(GROUPS_DIR, folder, 'CLAUDE.md');
-        if (fs.existsSync(templatePath) && !fs.existsSync(destPath)) {
-          try {
-            fs.mkdirSync(path.join(GROUPS_DIR, folder), { recursive: true });
-            fs.copyFileSync(templatePath, destPath);
-            logger.info({ folder }, 'Copied Teams CLAUDE.md template to new channel');
-          } catch (err) {
-            logger.warn({ err, folder }, 'Failed to copy Teams CLAUDE.md template');
+        // For non-main channels, copy CLAUDE.md template from teams-harmen
+        if (folder !== MAIN_GROUP_FOLDER) {
+          const templatePath = path.join(GROUPS_DIR, 'teams-harmen', 'CLAUDE.md');
+          const destPath = path.join(GROUPS_DIR, folder, 'CLAUDE.md');
+          if (fs.existsSync(templatePath) && !fs.existsSync(destPath)) {
+            try {
+              fs.mkdirSync(path.join(GROUPS_DIR, folder), { recursive: true });
+              fs.copyFileSync(templatePath, destPath);
+              logger.info({ folder }, 'Copied Teams CLAUDE.md template to new channel');
+            } catch (err) {
+              logger.warn({ err, folder }, 'Failed to copy Teams CLAUDE.md template');
+            }
           }
         }
       }

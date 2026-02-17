@@ -496,6 +496,8 @@ async function main(): Promise<void> {
       appId: TEAMS_APP_ID,
       appSecret: TEAMS_APP_SECRET,
       onRegisterGroup: (jid, group) => registerGroup(jid, group),
+      hasMainTeamsChannel: () => Object.entries(registeredGroups)
+        .some(([jid, g]) => jid.startsWith('teams:') && g.folder === MAIN_GROUP_FOLDER),
     });
     channels.push(teams);
     await teams.connect();
