@@ -6,8 +6,10 @@ import {
   Activity,
 } from 'botbuilder';
 import { Server } from 'http';
+import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN, TEAMS_PORT, TEAMS_TENANT_ID } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN, TEAMS_PORT, TEAMS_TENANT_ID, GROUPS_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, QuestionOption, RegisteredGroup } from '../types.js';
 
@@ -15,6 +17,7 @@ export interface TeamsChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onRegisterGroup: (jid: string, group: RegisteredGroup) => void;
   appId: string;
   appSecret: string;
 }
@@ -91,13 +94,37 @@ export class TeamsChannel implements Channel {
 
       this.opts.onChatMetadata(jid, timestamp, channelName);
 
-      const group = this.opts.registeredGroups()[jid];
+      let group = this.opts.registeredGroups()[jid];
       if (!group) {
-        logger.info({ jid, channelName, sender: senderName }, 'Message from unregistered Teams channel — register this JID');
-        // Reply with the JID so it can be registered
-        await context.sendActivity(`⚙️ Unregistered channel. JID: \`${jid}\``);
-        await next();
-        return;
+        // Auto-register new Teams channels on first message
+        const rawName = (activity.channelData as any)?.channel?.name
+          || activity.conversation?.name
+          || 'Teams Channel';
+        const displayName = `Teams - ${rawName}`;
+        // Derive a folder name: lowercase, hyphens, strip special chars
+        const folder = `teams-${rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+        group = {
+          name: displayName,
+          folder,
+          trigger: `@${ASSISTANT_NAME}`,
+          requiresTrigger: false,
+          added_at: new Date().toISOString(),
+        };
+        logger.info({ jid, displayName, folder }, 'Auto-registering new Teams channel');
+        this.opts.onRegisterGroup(jid, group);
+
+        // Copy CLAUDE.md template from teams-harmen if it exists
+        const templatePath = path.join(GROUPS_DIR, 'teams-harmen', 'CLAUDE.md');
+        const destPath = path.join(GROUPS_DIR, folder, 'CLAUDE.md');
+        if (fs.existsSync(templatePath) && !fs.existsSync(destPath)) {
+          try {
+            fs.mkdirSync(path.join(GROUPS_DIR, folder), { recursive: true });
+            fs.copyFileSync(templatePath, destPath);
+            logger.info({ folder }, 'Copied Teams CLAUDE.md template to new channel');
+          } catch (err) {
+            logger.warn({ err, folder }, 'Failed to copy Teams CLAUDE.md template');
+          }
+        }
       }
 
       this.opts.onMessage(jid, {

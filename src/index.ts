@@ -495,6 +495,7 @@ async function main(): Promise<void> {
       ...channelOpts,
       appId: TEAMS_APP_ID,
       appSecret: TEAMS_APP_SECRET,
+      onRegisterGroup: (jid, group) => registerGroup(jid, group),
     });
     channels.push(teams);
     await teams.connect();
